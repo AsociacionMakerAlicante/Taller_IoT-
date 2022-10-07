@@ -4,9 +4,8 @@
 #include <hal/hal.h>
 #include <RocketScream_LowPowerAVRZero.h>
 
-// 
+// Declaración de funciones.
 void wakeUp(void);
-void onEvent (ev_t ev);
 void pulsador(void);
 void do_send(osjob_t* j);
 
@@ -18,34 +17,30 @@ volatile boolean envioEnCurso = false;
  **********************************/
 const uint8_t unusedPins[] = {1, 2, 3, 12, 13, 15, 16, 17, 19, 20, 21};
 
-// This EUI must be in little-endian format, so least-significant-byte
-// first. When copying an EUI from ttnctl output, this means to reverse
-// the bytes. For TTN issued EUIs the last bytes should be 0xD5, 0xB3,
-// 0x70.
-static const u1_t PROGMEM APPEUI[8]={0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
-
-void os_getArtEui (u1_t* buf) { memcpy_P(buf, APPEUI, 8);}
-
-// This should also be in little endian format, see above.
-static const u1_t PROGMEM DEVEUI[8]={ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+// Device EUI. Al copiar los datos de la consola de Helium hay que indicarle que lo haga en formato "lsb"
+static const u1_t PROGMEM DEVEUI[8]={0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 void os_getDevEui (u1_t* buf) { memcpy_P(buf, DEVEUI, 8);}
 
-// This key should be in big endian format (or, since it is not really a
-// number but a block of memory, endianness does not really apply). In
-// practice, a key taken from ttnctl can be copied as-is.
-// The key shown here is the semtech default key.
 
+// App EUI. Al copiar los datos de la consola de Helium hay que indicarle que lo haga en formato "lsb"
+static const u1_t PROGMEM APPEUI[8]={0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+void os_getArtEui (u1_t* buf) { memcpy_P(buf, APPEUI, 8);}
+
+
+// App Key. Al copiar los datos de la consola de Helium hay que indicarle que lo haga en formato "msb"
 static const u1_t PROGMEM APPKEY[16] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 void os_getDevKey (u1_t* buf) {  memcpy_P(buf, APPKEY, 16);}
 
 static uint8_t mydata[] = "Hola, mundo!";
 static osjob_t sendjob;
 
-// Schedule TX every this many seconds (might become longer due to duty
-// cycle limitations).
+// Intervalo en segundos entre envios (Pensado para placas que no duermen). El tiempo empieza a contar
+// al finalizar la trasmisión. Por ejemplo si tenemos un intervalo de 60 segundos, el primer envío
+// se hace a las 12:00:00 y la transmisión dura 2 segundos, el segundo envío se hace a las 12:01:02
 const unsigned TX_INTERVAL = 60; 
 
-// Pin mapping
+// Al compilar aparece un aviso de que no tiene el pinmap de la placa y que debemos utilizar un propio.
+// Le damos el pin map de la placa.
 const lmic_pinmap lmic_pins = {
     .nss = RFM95_SS,
     .rxtx = LMIC_UNUSED_PIN,
@@ -53,7 +48,8 @@ const lmic_pinmap lmic_pins = {
     .dio = {RFM95_DIO0, RFM95_DIO1, LMIC_UNUSED_PIN},
 };
 
-
+// Imprime información en hexadecimal en el monitor serial al producirse el evento "Joined"
+// (Se ha unido correctamente)
 void printHex2(unsigned v) {
     v &= 0xff;
     if (v < 16)
@@ -61,6 +57,8 @@ void printHex2(unsigned v) {
     Serial2.print(v, HEX);
 }
 
+// Función declarada en la libreria lmic. Se ejecuta cada vez que se produce un evento.
+// Aquí pondremos el código de control.
 void onEvent (ev_t ev) {
     Serial2.print(os_getTime());
     Serial2.print(": ");
@@ -106,9 +104,9 @@ void onEvent (ev_t ev) {
                       printHex2(nwkKey[i]);
               }
               Serial2.println();
-            }//
-            // Disable link check validation (automatically enabled
-            // during join, but not supported by TTN at this time).
+            }
+            //Deshabilitar la validación de comprobación de enlaces (habilitada automáticamente durante la unión, 
+            // pero no es compatible con TTN en este momento).
             LMIC_setLinkCheckMode(0); //0
             break;
         case EV_RFU1:
@@ -131,7 +129,7 @@ void onEvent (ev_t ev) {
               Serial2.println(LMIC.dataLen);
               Serial2.println(F(" bytes of payload"));
             }
-            // Schedule next transmission
+            // Programar la próxima transmisión.
             os_setTimedCallback(&sendjob, os_getTime()+sec2osticks(TX_INTERVAL), do_send);
             break;
         case EV_LOST_TSYNC:
@@ -157,7 +155,7 @@ void onEvent (ev_t ev) {
             Serial2.println(F("EV_TXCANCELED"));
             break;
         case EV_RXSTART:
-            /* do not print anything -- it wrecks timing */
+            /* No utilizar el monitor serial en este evento. */
             break;
         case EV_JOIN_TXCOMPLETE:
             Serial2.println(F("EV_JOIN_TXCOMPLETE: no JoinAccept"));
@@ -170,21 +168,21 @@ void onEvent (ev_t ev) {
     envioEnCurso = false;
 }
 
+// Lanza la transmisión de los datos.
 void do_send(osjob_t* j){
-    // Check if there is not a current TX/RX job running
+    // Comprueba si hay un trabajo TX/RX actual en ejecución
     if (LMIC.opmode & OP_TXRXPEND) {
         Serial2.println(F("OP_TXRXPEND, not sending"));
     } else {
-        // Prepare upstream data transmission at the next possible time.
+        // Prepara el envío de datos en el próximo momento posible.
         LMIC_setTxData2(1, mydata, sizeof(mydata)-1, 0);
         Serial2.println(F("Packet queued"));
     }
-    // Next TX is scheduled after TX_COMPLETE event.
+    // El próximo envío está programado después del evento EV_TXCOMPLETE (Transmisión completa).
 }
 
 void setup() {
 
-    /* Ensure unused pins are not floating */
     //Reduce el consumo de los pines que no se van a usar en el ATmega4808
     uint8_t index;
     for (index = 0; index < sizeof(unusedPins); index++)
@@ -194,7 +192,8 @@ void setup() {
     }
 
     //Configuramos la interrupción en el ATmega4808 que produce el pin de Wake del TPL5010
-    attachInterrupt(digitalPinToInterrupt(TPL5010_WAKE), wakeUp, CHANGE);
+    // attachInterrupt(digitalPinToInterrupt(TPL5010_WAKE), wakeUp, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(TPL5010_WAKE), wakeUp, FALLING);
 
     //Configuramos la interrupción en el ATmega4808 que produce el pulsador.
     attachInterrupt(digitalPinToInterrupt(PIN_PD2), pulsador, FALLING);
@@ -211,7 +210,8 @@ void setup() {
 
     // LMIC init
     os_init();
-    // Reset the MAC state. Session and pending data transfers will be discarded.
+    
+    // Restablece el estado MAC. Se descartarán las transferencias de datos de sesión y pendientes.
     LMIC_reset();
     
     // allow much more clock error than the X/1000 default. See:
@@ -220,43 +220,42 @@ void setup() {
     // the X/1000 means an error rate of 0.1%; the above issue discusses using
     // values up to 10%. so, values from 10 (10% error, the most lax) to 1000
     // (0.1% error, the most strict) can be used.
+    
+    // ### Preguntar Jorge ###
     LMIC_setClockError(MAX_CLOCK_ERROR * 10 / 100);
 
     // Sub-band 2 - Helium Network
     LMIC_setLinkCheckMode(0); //0
+
+    // Creo que tiene que ver con la potencia de emisión. El rango está entre 7 y 14.
+    // Parece que cuanto mas bajo este factor mas lejos llegan los datos. 
+    // Haciendo pruebas con 14 no me conectó nunca. Con 7 me conectó algunas veces.
+    // ### Preguntar Jorge ###
     LMIC_setDrTxpow(DR_SF7, 14);//7,14
 
-    // Start job (sending automatically starts OTAA too)
+    // Iniciar trabajo (el envío también inicia automáticamente OTAA)
+    // (OTAA es el sistema de autenricación de Helium)
     do_send(&sendjob);
+
+    // ### Preguntar a Jorge si hay que quitarlo ###
     os_setCallback (&sendjob, do_send); //QUITAR
 
-     //Configuración de pines, usar #defines en lugar de número mágicos.
-    pinMode(LED_BUILTIN, OUTPUT); //LED
-    pinMode(TPL5010_WAKE, INPUT); //TPL5010 WAKE
-    pinMode(TPL5010_DONE, OUTPUT); //TPL5010 DONE4
-    pinMode(PIN_PD2, INPUT); //Pulsador
+     //Configuración de pines.
+    pinMode(LED_BUILTIN, OUTPUT);   //LED
+    pinMode(TPL5010_WAKE, INPUT);   //TPL5010 WAKE
+    pinMode(TPL5010_DONE, OUTPUT);  //TPL5010 DONE4
+    pinMode(PIN_PD2, INPUT);        //Pulsador
 
     //Generamos el pulso de DONE del TPL5010
     //El TPL5010 comienza a funcionar.
     digitalWrite(TPL5010_DONE, HIGH);
     delay(1);
     digitalWrite(TPL5010_DONE, LOW);
-
-    
   }
 
 void loop() {
-    //El programa continua aquí cada vez que se despierta de la ISR. 
-    //Preparamos un envío a The Things Network.
-    //envioEnCurso = true;  //Se pone en false cuando se finaliza el envío.
-    //os_setCallback (&sendjob, do_send); 
-    //while (envioEnCurso)
-    //{
-      os_runloop_once();
-    //}
-    
-    //Microcontrolador a dormir después de procesar la ISR del timer.
-    //LowPower.powerDown();
+    // Comprueba si tiene que hacer un envío.
+    os_runloop_once();
 }
 
 //TIC Timer 18k -> 36s, 20k -> 60s.
@@ -268,6 +267,7 @@ void wakeUp(void)
     digitalWrite(TPL5010_DONE, LOW); 
 }
 
+// Evento producido cuando se presiona el pulsador.
 void pulsador(void)
 {   
     //Preparamos un envío a The Things Network.
