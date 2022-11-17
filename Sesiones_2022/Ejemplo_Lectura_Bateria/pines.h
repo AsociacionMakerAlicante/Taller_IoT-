@@ -5,7 +5,7 @@
 #define PINES_H
 
 #include <Arduino.h>
-#define VERSION_1 //Comentar esta línea para la placa usada en el Maker.
+//#define VERSION_1 //Comentar esta línea para la placa usada en el Maker.
 
 // Definición de los pines asignados en el hardware.
 //TPL5010 Timer
